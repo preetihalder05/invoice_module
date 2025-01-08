@@ -1,0 +1,14 @@
+{
+    "params":
+    {
+       
+        "host":"localhost",
+        "user":"root",
+        "password":"root",
+        "database":"preeti_db",
+        "auth_plugin": "mysql_native_password",
+        "raise_on_warnings": "True",
+        "local_server":"True"
+    }
+    
+}
