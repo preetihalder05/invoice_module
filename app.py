@@ -1,14 +1,27 @@
-from flask import Flask,jsonify,request
+from flask import Flask, jsonify, request
 import pandas as pd
-# from sqlalchemy import create_engine
-import mysql.connector
+from sqlalchemy import create_engine
 import json
-# pip install -r requirements.txt
+import boto3
+import io
+import mysql.connector
+import os
 
-app = Flask(__name__)
-with open('config.json','r') as c:
-    params=json.load(c)['params']
+# Initialize Flask app
+app2 = Flask(__name__)
 
+# Load configuration from JSON
+with open('config.json', 'r') as c:
+    params = json.load(c)['params']
+
+# Database Configuration
+db_user = params['user']
+db_password = params['password']
+db_host = params['host']
+db_name = params['database']
+
+# SQLAlchemy Engine
+engine = create_engine(f"mysql+mysqlconnector://{db_user}:{db_password}@{db_host}/{db_name}")
 
 config = {
     'user': params['user'],
@@ -16,156 +29,82 @@ config = {
     'host': params['host'],
     'database': params['database']
 }
-@app.route('/')
+
+# S3 Configuration
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('AWS_ACCESS_INVOICE'),
+    aws_secret_access_key=os.getenv('AWS_SECRECT_INVOICE'),
+    region_name='ap-southeast-1'  # Replace with your AWS region
+)
+
+@app2.route('/')
 def index():
-    return "hello"
+    return str(os.getenv('AWS_ACCESS_INVOICE'))
 
-@app.route('/fetch_data',methods=['GET'])
+@app2.route('/insert_data', methods=['POST'])
+def insert_data():
+    try:
+        # Step 1: Read CSV file from S3
+        bucket_name = 'invoicing-module'
+        s3_key = 'issuer_data/FX Raw Data 26thJune24 to 30th June24.csv'
+
+        # Download the CSV file content into memory
+        response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+        csv_content = response['Body'].read().decode('utf-8')
+
+        # Convert the CSV content to a DataFrame
+        df = pd.read_csv(io.StringIO(csv_content))
+        
+        # Convert DataFrame to JSON
+        json_data = df.to_json(orient='records', lines=True)
+
+        # Optional: Save JSON to a local file
+        with open('preeti.json', 'w') as file:
+            file.write(json_data)
+
+        # Print a few records to verify
+        list_of_dicts = df.to_dict(orient='records')
+        for record in list_of_dicts[:5]:
+            print(record)
+
+        # Step 2: Insert Data into MySQL
+        df.to_sql('preeti_data', con=engine, if_exists='replace', index=False)
+        print("Data imported successfully into MySQL database!")
+
+        return jsonify({"message": "Data inserted successfully!"})
+
+    except Exception as e:
+        print("Error:", e)
+        return jsonify({"error": "An error occurred", "message": str(e)})
+
+    finally:
+        engine.dispose()
+
+@app2.route('/fetch_data', methods=['GET'])
 def fetch_data():
-    df=pd.read_csv('preeti.csv')
-    # df.head()
-    # Convert the DataFrame to JSON format
-    json_data = df.to_json(orient='records', lines=True)
-
-    # Save JSON data to a file (optional)
-    with open('preeti.json', 'w') as file:
-        file.write(json_data)
-
-    # Convert the DataFrame to a list of dictionaries
-    list_of_dicts = df.to_dict(orient='records')
-
-    # Print only the first 5 dictionaries
-    for record in list_of_dicts[:5]:
-        print(record)
-    # Print the JSON data (optional)
-    # print(type(json_data))
-    #print(json_data)
     try:
         # Connect to the MySQL database
         conn = mysql.connector.connect(**config)
-        # print("Connection Success")
-        cursor = conn.cursor()
+        print("Connection Success")
+        cursor = conn.cursor(dictionary=True)
 
-        # Insert the user data without specifying user_id
-        df.to_sql('preeti_data', if_exists='replace', index=False)
-        print("Data imported successfully into MySQL database!")
-        # print("Data Inserted")
-        conn.commit()
-    except Exception as e:
-        print(e)
-        conn.rollback()
-        return {"error": "An error occurred", "message": str(e)}
-    finally:
+        # Fetch data
+        select_query = "SELECT * FROM preeti_data;"
+        cursor.execute(select_query)
+        user = cursor.fetchall()
+
         # Close the cursor and connection
         cursor.close()
         conn.close()
-    # return jsonify({})
-    return "data inserted"
 
+        if user:
+            return jsonify(user)
+        else:
+            return jsonify({"message": "No data found in the table"})
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# # Step 1: Read CSV and Convert to JSON
-# df = pd.read_csv('preeti.csv')
-
-# # Optional: Save JSON data if needed
-# df.to_json('preeti.json', orient='records', lines=True)
-
-# Step 2: Connect to MySQL Database
-# db_user = 'root'          # Replace with your MySQL username
-# db_password = 'root'  # Replace with your MySQL password
-# db_host = 'localhost'          # Replace with your database host
-# db_name = 'preeti_db'          # Your MySQL database name
-
-# engine = create_engine(f'mysql+mysqlconnector://root:root@{db_host}/preeti_db')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# # Step 3: Import CSV Data into MySQL Table
-# table_name = 'preeti_data'  # Ensure this table exists in your MySQL database
-
-
-
-# try:
-#     # Dynamically create table and insert data
-#     df.to_sql('preeti_data', con=engine, if_exists='replace', index=False)
-#     print("Data imported successfully into MySQL database!")
-# except Exception as e:
-#     print("Error:", e)
-
-# # Optional: Verify data insertion
-# with engine.connect() as connection:
-#     result = connection.execute(f"SELECT COUNT(*) FROM {'preeti_data'}")
-#     for row in result:
-#         print("Number of records inserted:", row[0])
+    except mysql.connector.Error as err:
+        return jsonify({"error": "An error occurred", "message": str(err)})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app2.run(debug=True)
