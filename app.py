@@ -35,12 +35,12 @@ s3_client = boto3.client(
     's3',
     aws_access_key_id=os.getenv('AWS_ACCESS_INVOICE'),
     aws_secret_access_key=os.getenv('AWS_SECRECT_INVOICE'),
-    region_name='ap-southeast-1'  # Replace with your AWS region
+    region_name=os.getenv('AWS_REGION_INVOICE')  # Replace with your AWS region
 )
 
 @app2.route('/')
 def index():
-    return str(os.getenv('AWS_ACCESS_INVOICE'))
+    return str(os.getenv('AWS_REGION_INVOICE'))
 
 @app2.route('/insert_data', methods=['POST'])
 def insert_data():
